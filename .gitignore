@@ -1,7 +1,4 @@
 node_modules
-*/dist
-dist
-/dist
 *.env
 */test.ts
 *server.test.ts
