@@ -1,7 +1,7 @@
 {
   "parser": "@typescript-eslint/parser",
   "plugins": ["@typescript-eslint"],
-  "extends": ["airbnb-base", "airbnb-typescript/base"],
+  "extends": ["airbnb-typescript/base"],
   "parserOptions": {
     "project": [
       "./tsconfig.json"
@@ -9,7 +9,6 @@
   },
   "rules": {
     "import/no-extraneous-dependencies" : "off",
-    "@typescript-eslint/no-redeclare": "off",
-    "import/no-import-module-exports": "off"
+    "@typescript-eslint/no-redeclare": "off"
   }
 }

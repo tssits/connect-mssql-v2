@@ -2,8 +2,7 @@
 
 ## Prerequisites
 
-Before running tests, you must create the following table within a MS SQL server database.  
-The test user must have `db_datareader`, `db_datawriter`, and `db_ddladmin` permissions.
+Before running tests, you must create the following table within a MS SQL server database. 
 ```sql
 CREATE TABLE [dbo].[sessions](
     [sid] [nvarchar](255) NOT NULL PRIMARY KEY,

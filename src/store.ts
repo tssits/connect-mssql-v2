@@ -1,81 +1,51 @@
 import sql, {
-  config as SQLConfig,
-  NVarChar,
-  MAX,
-  DateTime,
-  ConnectionPool,
-  ISqlTypeWithLength,
-  IResult,
-  IRecordSet,
-  ISqlTypeFactoryWithNoParams,
+  config as SQLConfig, NVarChar, VarChar, MAX, DateTime, ConnectionPool,
 } from 'mssql';
-import session, { SessionData, Store as ExpressSessionStore } from 'express-session';
+import { SessionData, Store as ExpressSessionStore } from 'express-session';
 
 export interface StoreOptions {
   /**
-   * Table to use as session store. Default: `[sessions]`
-   */
+     * Table to use as session store. Default: `[sessions]`
+     */
   table?: string;
   /**
-   * (Time To Live) Determines the expiration date. Default: `1000 * 60 * 60 * 24` (24 hours)
-   */
+     * (Time To Live) Determines the expiration date. Default: `1000 * 60 * 60 * 24` (24 hours)
+     */
   ttl?: number;
   /**
-   * Determines if expired sessions should be auto-removed or not.
-   * If value is `true` then a new function, `destroyExpired()`,
-   * will auto-delete expired sessions on a set interval. Default: `false`
-   */
+     * Determines if expired sessions should be autoremoved or not.
+     * If value is `true` then a new function, `destroyExpired()`,
+     * will autodelete expired sessions on a set interval. Default: `false`
+     */
   autoRemove?: boolean;
   /**
-   * Sets the timer interval for each call to `destroyExpired()`.
-   * Default: `1000 * 60 * 10` (10 min)
-   */
+     * Sets the timer interval for each call to `destroyExpired()`.
+     * Default: `1000 * 60 * 10` (10 min)
+     */
   autoRemoveInterval?: number;
   /**
-   * Callback function that is called before a session is removed.
-   * Can return a promise that will be awaited before continuing.
-   */
-  preRemoveCallback?: () => Promise<any>;
-  /**
-   * Is the callback function for `destroyExpired()`. Default: `undefined`
-   */
+     * Is the callback function for `destroyExpired()`. Default: `undefined`
+     */
   autoRemoveCallback?: (props: any) => any;
   /**
-   * Determines if we are to use the `GETUTCDATE` instead of `GETDATE` Default: `true`
-   */
+     * Determines if we are to use the `GETUTCDATE` instead of `GETDATE` Default: `true`
+     */
   useUTC?: boolean;
 }
-export interface MSSQLStoreDef {
+export interface IMSSQLStore {
   config: SQLConfig;
   options?: StoreOptions;
   databaseConnection: ConnectionPool | null;
-  all(
-    callback: (err: unknown, session?: { [sid: string]: SessionData } | null) => void,
-  ): Promise<void>;
-  get(sid: string, callback: (err: unknown, session?: SessionData | null) => void): Promise<void>;
-  set(sid: string, currentSession: SessionData, callback?: (err?: unknown) => void): Promise<void>;
-  touch(
-    sid: string,
-    currentSession: SessionData,
-    callback?: (err?: unknown) => void,
-  ): Promise<void>;
-  destroy(sid: string, callback?: (err?: unknown) => void): Promise<void>;
-  destroyExpired(callback?: Function): Promise<void>;
-  length(callback: (err: unknown, length?: number | null) => void): Promise<void>;
-  clear(callback?: (err?: unknown) => void): Promise<void>;
+  all(callback: (err: any, session?: { [sid: string]: SessionData } | null) => void): void;
+  get(sid: string, callback: (err: any, session?: SessionData | null) => void): void;
+  set(sid: string, session: SessionData, callback?: (err?: any) => void): void;
+  touch(sid: string, session: SessionData, callback?: (err?: any) => void): void;
+  destroy(sid: string, callback?: (err?: any) => void): void;
+  destroyExpired(callback?: Function): void;
+  length(callback: (err: any, length?: number | null) => void): void;
+  clear(callback?: (err?: any) => void): void;
 }
-
-type SQLDataTypes = ISqlTypeWithLength | ISqlTypeFactoryWithNoParams;
-interface InputParameter {
-  value: string | Date;
-  dataType: SQLDataTypes;
-}
-interface QueryRunnerProps {
-  inputParameters?: Record<string, InputParameter>;
-  expectReturn: boolean;
-  queryStatement: string;
-}
-class MSSQLStore extends ExpressSessionStore implements MSSQLStoreDef {
+class MSSQLStore extends ExpressSessionStore implements IMSSQLStore {
   table: string;
 
   ttl: number;
@@ -83,8 +53,6 @@ class MSSQLStore extends ExpressSessionStore implements MSSQLStoreDef {
   autoRemove: boolean;
 
   autoRemoveInterval: number;
-
-  preRemoveCallback?: (props?: any) => Promise<any> | any;
 
   autoRemoveCallback?: (props?: any) => any;
 
@@ -100,22 +68,16 @@ class MSSQLStore extends ExpressSessionStore implements MSSQLStoreDef {
     this.ttl = options?.ttl || 1000 * 60 * 60 * 24;
     this.autoRemove = options?.autoRemove || false;
     this.autoRemoveInterval = options?.autoRemoveInterval || 1000 * 60 * 10;
-    this.preRemoveCallback = options?.preRemoveCallback || undefined;
     this.autoRemoveCallback = options?.autoRemoveCallback || undefined;
     this.useUTC = options?.useUTC || true;
     this.config = config;
     this.databaseConnection = new sql.ConnectionPool(config);
   }
 
-  // ////////////////////////////////////////////////////////////////
-  /**
-   * Initializes connection to the database and emits connect on success or error on failure
-   */
-  // ////////////////////////////////////////////////////////////////
   private async initializeDatabase() {
-    // Attaches connect event listener and emits on successful connection
+    // Attachs connect event listener and emits on successful connection
     this.databaseConnection.on('connect', () => this.emit('connect', this));
-    // Attaches error event listener and emits on failed connection
+    // Attachs error event listener and emits on failed connection
     this.databaseConnection.on('error', (error) => this.emit('error', error));
 
     await this.databaseConnection.connect();
@@ -125,88 +87,43 @@ class MSSQLStore extends ExpressSessionStore implements MSSQLStoreDef {
     }
   }
 
-  // ////////////////////////////////////////////////////////////////
-  /**
-   * Verifies database connection has been established, and if not, will initialize connection
-   */
-  // ////////////////////////////////////////////////////////////////
-  private async dbReadyCheck() {
+  private async ready(callback: (err?: any, callback?: any) => Promise<any>) {
     try {
       if (!this.databaseConnection.connected && !this.databaseConnection.connecting) {
         await this.initializeDatabase();
       }
-
       if (this.databaseConnection?.connected) {
-        return true;
+        return callback(null, null);
       }
-
+      if (this.databaseConnection?.connecting) {
+        return this.databaseConnection.once('connect', callback.bind(this));
+      }
       throw new Error('Connection is closed.');
     } catch (error) {
-      this.databaseConnection!.emit('error', error);
-      throw error;
+      if (callback) {
+        callback(error);
+      }
+      return this.databaseConnection!.emit('error', error);
     }
   }
 
   // ////////////////////////////////////////////////////////////////
   /**
-   * Verify session.cookie.expires is not a boolean. If so, use current time along with
-   * ttl else return session.cookie.expires
-   * @param sessionCookie
-   */
-  // ////////////////////////////////////////////////////////////////
-  private getExpirationDate(sessionCookie: session.Cookie) {
-    const isExpireBoolean = !!sessionCookie && typeof sessionCookie.expires === 'boolean';
-    const expires = new Date(
-      isExpireBoolean || !sessionCookie?.expires ? Date.now() + this.ttl : sessionCookie.expires,
-    );
-
-    return expires;
-  }
-
-  // ////////////////////////////////////////////////////////////////
-  /**
-   * Runs the provided query statement against the database.
-   * Returns T if expectReturn is true else returns null
-   * @param props
-   */
-  // ////////////////////////////////////////////////////////////////
-  private async queryRunner<T>(props: QueryRunnerProps): Promise<IRecordSet<T> | null> {
-    const isReady = await this.dbReadyCheck();
-    if (!isReady) {
-      throw new Error('Database connection is closed');
-    }
-    // TODO: might not actually need await?
-    const request = await this.databaseConnection.request();
-    const { inputParameters, expectReturn, queryStatement } = props;
-    /**
-     * If any inputParameters exist, attach to request object
-     */
-    Object.entries(inputParameters ?? {}).forEach(([key, { value, dataType }]) => {
-      request.input(key, dataType, value);
-    });
-    /**
-     * Run query against database
-     */
-    const result: IResult<T> = await request.query(queryStatement);
-
-    return expectReturn ? result.recordset : null;
-  }
-
-  // ////////////////////////////////////////////////////////////////
-  /**
-   * Attaches sessionError event listener and emits on error on any
-   * store error and includes method where error occurred
+   * Attachs sessionError event listener and emits on error on any
+   * store error and includes method where error occured
    * @param method
    * @param error
    * @param callback
    */
   // ////////////////////////////////////////////////////////////////
-  errorHandler(method: keyof MSSQLStoreDef, error: unknown, callback?: any) {
+  errorHandler(method: keyof IMSSQLStore, error: any, callback?: any) {
     // eslint-disable-next-line no-shadow
     this.databaseConnection.once('sessionError', () => this.emit('sessionError', error, method));
     this.databaseConnection.emit('sessionError', error, method);
-
-    return callback ? callback(error) : null;
+    if (callback) {
+      return callback(error);
+    }
+    return undefined;
   }
 
   // ////////////////////////////////////////////////////////////////
@@ -215,24 +132,33 @@ class MSSQLStore extends ExpressSessionStore implements MSSQLStoreDef {
    * @param callback
    */
   // //////////////////////////////////////////////////////////////
-  async all(callback: (err: unknown, session?: { [sid: string]: SessionData } | null) => void) {
-    try {
-      const queryResult = await this.queryRunner<{ sid: string; session: string }>({
-        queryStatement: `SELECT sid, session FROM ${this.table}`,
-        expectReturn: true,
-      });
-      const returnObject: { [sid: string]: SessionData } = {};
-
-      if (queryResult) {
-        queryResult.forEach(({ sid, session: sessionValue }) => {
-          returnObject[sid] = JSON.parse(sessionValue);
-        });
+  all(callback: (err: any, session?: { [sid: string]: SessionData } | null) => void) {
+    this.ready(async (error: any) => {
+      if (error) {
+        throw error;
       }
 
-      callback(null, queryResult?.length ? returnObject : null);
-    } catch (err) {
-      this.errorHandler('all', err, callback);
-    }
+      try {
+        const request = (this.databaseConnection as ConnectionPool).request();
+        const result: {
+          recordset: { sid: string; session: any }[];
+        } = await request.query(`
+              SELECT sid, session FROM ${this.table}`);
+
+        if (result.recordset.length) {
+          const returnObject: { [sid: string]: SessionData } = {};
+          for (let i = 0; i < result.recordset.length; i += 1) {
+            returnObject[result.recordset[i].sid] = JSON.parse(result.recordset[i].session);
+          }
+
+          return callback(null, returnObject);
+        }
+
+        return callback(null, null);
+      } catch (err) {
+        return this.errorHandler('all', err, callback);
+      }
+    });
   }
 
   // ////////////////////////////////////////////////////////////////
@@ -242,56 +168,75 @@ class MSSQLStore extends ExpressSessionStore implements MSSQLStoreDef {
    * @param callback
    */
   // //////////////////////////////////////////////////////////////
-  async get(sid: string, callback: (err: unknown, session?: SessionData | null) => void) {
-    try {
-      const queryResult = await this.queryRunner<{ session: string }>({
-        inputParameters: { sid: { value: sid, dataType: NVarChar(255) } },
-        queryStatement: `SELECT session 
-                           FROM ${this.table}
-                           WHERE sid = @sid`,
-        expectReturn: true,
-      });
+  get(sid: string, callback: (err: any, session?: SessionData | null) => void) {
+    this.ready(async (error: any) => {
+      if (error) {
+        throw error;
+      }
 
-      callback(null, queryResult?.length ? JSON.parse(queryResult[0].session) : null);
-    } catch (err) {
-      this.errorHandler('get', err, callback);
-    }
+      try {
+        const request = (this.databaseConnection as ConnectionPool).request();
+        const result = await request.input('sid', VarChar(900), sid).query(`
+              SELECT session FROM ${this.table} WHERE sid = @sid`);
+
+        if (result.recordset.length) {
+          return callback(null, JSON.parse(result.recordset[0].session));
+        }
+
+        return callback(null, null);
+      } catch (err) {
+        return this.errorHandler('get', err, callback);
+      }
+    });
   }
 
   // ////////////////////////////////////////////////////////////////
   /**
    * Commit the given session object associated with the given sid
    * @param sid
-   * @param currentSession
+   * @param session
    * @param callback
    */
   // //////////////////////////////////////////////////////////////
-  async set(sid: string, currentSession: SessionData, callback?: (err?: unknown) => void) {
-    try {
-      const expires = this.getExpirationDate(currentSession.cookie);
-      await this.queryRunner({
-        inputParameters: {
-          sid: { value: sid, dataType: NVarChar(255) },
-          session: { value: JSON.stringify(currentSession), dataType: NVarChar(MAX) },
-          expires: { value: expires, dataType: DateTime },
-        },
-        queryStatement: `UPDATE ${this.table} 
-                           SET session = @session, expires = @expires 
-                           WHERE sid = @sid;
-                           IF @@ROWCOUNT = 0 
-                            BEGIN
-                              INSERT INTO ${this.table} (sid, session, expires)
-                                VALUES (@sid, @session, @expires)
-                            END;`,
-        expectReturn: false,
-      });
-
-      if (callback) {
-        callback();
+  set(sid: string, session: SessionData, callback?: (err?: any) => void) {
+    this.ready(async (error: any) => {
+      if (error) {
+        throw error;
       }
-    } catch (err) {
-      this.errorHandler('set', err, callback);
-    }
+
+      try {
+        /**
+         * Verify session.cookie.expires is not a boolean. If so, use current time along with
+         * ttl else cast session.cookie.expires to Date to avoid TS error
+         */
+        const isExpireBoolean = !!session.cookie && typeof session.cookie.expires === 'boolean';
+        const expires = new Date(
+          isExpireBoolean || !session.cookie?.expires
+            ? Date.now() + this.ttl
+            : (session.cookie.expires as Date),
+        );
+        const request = (this.databaseConnection as ConnectionPool).request();
+        await request
+          .input('sid', VarChar(900), sid)
+          .input('session', NVarChar(MAX), JSON.stringify(session))
+          .input('expires', DateTime, expires).query(`
+              UPDATE ${this.table} 
+                SET session = @session, expires = @expires 
+                WHERE sid = @sid;
+                IF @@ROWCOUNT = 0 
+                  BEGIN
+                    INSERT INTO ${this.table} (sid, session, expires)
+                      VALUES (@sid, @session, @expires)
+                  END;`);
+
+        if (callback) {
+          return callback();
+        }
+        return null;
+      } catch (err) {
+        return this.errorHandler('set', err, callback);
+      }
+    });
   }
 
   // ////////////////////////////////////////////////////////////////
@@ -302,26 +247,37 @@ class MSSQLStore extends ExpressSessionStore implements MSSQLStoreDef {
    * @param callback
    */
   // //////////////////////////////////////////////////////////////
-  async touch(sid: string, currentSession: SessionData, callback: (err?: unknown) => void) {
-    try {
-      const expires = this.getExpirationDate(currentSession.cookie);
-      await this.queryRunner({
-        inputParameters: {
-          sid: { value: sid, dataType: NVarChar(255) },
-          expires: { value: expires, dataType: DateTime },
-        },
-        queryStatement: `UPDATE ${this.table} 
-                           SET expires = @expires 
-                           WHERE sid = @sid`,
-        expectReturn: false,
-      });
-
-      if (callback) {
-        callback();
+  touch(sid: string, session: SessionData, callback: (err?: any) => void) {
+    this.ready(async (error: any) => {
+      if (error) {
+        throw error;
       }
-    } catch (err) {
-      this.errorHandler('touch', err, callback);
-    }
+
+      try {
+        /**
+         * Verify session.cookie.expires is not a boolean. If so, use current time along with
+         * ttl else cast session.cookie.expires to Date to avoid TS error
+         */
+        const isExpireBoolean = !!session.cookie && typeof session.cookie.expires === 'boolean';
+        const expires = new Date(
+          isExpireBoolean || !session.cookie?.expires
+            ? Date.now() + this.ttl
+            : (session.cookie.expires as Date),
+        );
+        const request = (this.databaseConnection as ConnectionPool).request();
+        await request.input('sid', VarChar(900), sid).input('expires', DateTime, expires).query(`
+              UPDATE ${this.table} 
+                SET expires = @expires 
+              WHERE sid = @sid`);
+
+        if (callback) {
+          return callback();
+        }
+        return null;
+      } catch (err) {
+        return this.errorHandler('touch', err, callback);
+      }
+    });
   }
 
   // ////////////////////////////////////////////////////////////////
@@ -331,57 +287,60 @@ class MSSQLStore extends ExpressSessionStore implements MSSQLStoreDef {
    * @param callback
    */
   // //////////////////////////////////////////////////////////////
-  async destroy(sid: string, callback?: (err?: unknown) => void) {
-    try {
-      await this.queryRunner({
-        inputParameters: { sid: { value: sid, dataType: NVarChar(255) } },
-        queryStatement: `DELETE FROM ${this.table} 
-                           WHERE sid = @sid`,
-        expectReturn: false,
-      });
-
-      if (callback) {
-        callback();
+  destroy(sid: string, callback?: (err?: any) => void) {
+    this.ready(async (error: any) => {
+      if (error) {
+        throw error;
       }
-    } catch (err) {
-      this.errorHandler('destroy', err, callback);
-    }
+
+      try {
+        const request = (this.databaseConnection as ConnectionPool).request();
+        await request.input('sid', VarChar(900), sid).query(`
+              DELETE FROM ${this.table} 
+              WHERE sid = @sid`);
+
+        if (callback) {
+          return callback();
+        }
+        return null;
+      } catch (err) {
+        return this.errorHandler('destroy', err, callback);
+      }
+    });
   }
 
   // ////////////////////////////////////////////////////////////////
   /**
    * Destroy expired sessions
-   * @param removeCallback function called after the removal occurs
+   * @param callback
    */
   // //////////////////////////////////////////////////////////////
-  async destroyExpired(removeCallback?: Function) {
-    try {
-      if (this.preRemoveCallback) {
-        const $preRemoveValue = this.preRemoveCallback();
-        if ($preRemoveValue instanceof Promise) {
-          await $preRemoveValue;
+  destroyExpired(callback: any) {
+    this.ready(async (error: any) => {
+      if (error) {
+        throw error;
+      }
+
+      try {
+        const request = (this.databaseConnection as ConnectionPool).request();
+        await request.query(`
+              DELETE FROM ${this.table} 
+              WHERE expires <= GET${this.useUTC ? 'UTC' : ''}DATE()`);
+
+        if (this.autoRemoveCallback) {
+          this.autoRemoveCallback();
         }
+        if (callback) {
+          return callback();
+        }
+        return null;
+      } catch (err) {
+        if (this.autoRemoveCallback) {
+          this.autoRemoveCallback(err);
+        }
+        return this.errorHandler('destroyExpired', err, callback);
       }
-
-      await this.queryRunner({
-        queryStatement: `DELETE FROM ${this.table} 
-                           WHERE expires <= GET${this.useUTC ? 'UTC' : ''}DATE()`,
-        expectReturn: false,
-      });
-
-      if (this.autoRemoveCallback) {
-        this.autoRemoveCallback();
-      }
-
-      if (removeCallback) {
-        removeCallback();
-      }
-    } catch (err) {
-      if (this.autoRemoveCallback) {
-        this.autoRemoveCallback(err);
-      }
-      this.errorHandler('destroyExpired', err, removeCallback);
-    }
+    });
   }
 
   // ////////////////////////////////////////////////////////////////
@@ -390,18 +349,23 @@ class MSSQLStore extends ExpressSessionStore implements MSSQLStoreDef {
    * @param callback
    */
   // //////////////////////////////////////////////////////////////
-  async length(callback: (err: unknown, length: number) => void) {
-    try {
-      const queryResult = await this.queryRunner<{ length: number }>({
-        queryStatement: `SELECT COUNT(sid) AS length
-                           FROM ${this.table}`,
-        expectReturn: true,
-      });
+  length(callback: (err: any, length: number) => void) {
+    this.ready(async (error: any) => {
+      if (error) {
+        throw error;
+      }
 
-      callback(null, queryResult?.[0].length ?? 0);
-    } catch (err) {
-      this.errorHandler('length', err, callback);
-    }
+      try {
+        const request = (this.databaseConnection as ConnectionPool).request();
+        const result = await request.query(`
+              SELECT COUNT(sid) AS length
+              FROM ${this.table}`);
+
+        return callback(null, result.recordset[0].length);
+      } catch (err) {
+        return this.errorHandler('length', err, callback);
+      }
+    });
   }
 
   // ////////////////////////////////////////////////////////////////
@@ -410,26 +374,26 @@ class MSSQLStore extends ExpressSessionStore implements MSSQLStoreDef {
    * @param callback
    */
   // //////////////////////////////////////////////////////////////
-  async clear(callback: (err?: unknown) => void) {
-    try {
-      await this.queryRunner({
-        queryStatement: `TRUNCATE TABLE ${this.table}`,
-        expectReturn: false,
-      });
-
-      if (callback) {
-        callback();
+  clear(callback: (err?: any) => void) {
+    this.ready(async (error: any) => {
+      if (error) {
+        throw error;
       }
-    } catch (err) {
-      this.errorHandler('clear', err, callback);
-    }
+
+      try {
+        const request = (this.databaseConnection as ConnectionPool).request();
+        await request.query(`
+              TRUNCATE TABLE ${this.table}`);
+
+        if (callback) {
+          return callback();
+        }
+        return null;
+      } catch (err) {
+        return this.errorHandler('clear', err, callback);
+      }
+    });
   }
 }
-/**
- * 08/30/2021 - JL
- * * To correct an issue where you could not correctly require within a JS file without
- * * targeting the default export, we have added the line below. Should provide non-breaking fix.
- * * Might be modified for future versions with potential breaking change.
- */
-module.exports = MSSQLStore;
+
 export default MSSQLStore;
