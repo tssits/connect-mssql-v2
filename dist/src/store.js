@@ -127,7 +127,7 @@ class MSSQLStore extends express_session_1.Store {
             try {
                 const request = this.databaseConnection.request();
                 const result = await request.input('sid', mssql_1.VarChar(900), sid).query(`
-              SELECT session FROM ${this.table} WHERE sid = @sid`);
+              SELECT session FROM ${this.table} WITH (NOLOCK) WHERE sid = @sid`);
                 if (result.recordset.length) {
                     return callback(null, JSON.parse(result.recordset[0].session));
                 }

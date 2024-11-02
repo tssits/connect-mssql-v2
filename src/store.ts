@@ -177,7 +177,7 @@ class MSSQLStore extends ExpressSessionStore implements IMSSQLStore {
       try {
         const request = (this.databaseConnection as ConnectionPool).request();
         const result = await request.input('sid', VarChar(900), sid).query(`
-              SELECT session FROM ${this.table} WHERE sid = @sid`);
+              SELECT session FROM ${this.table} WITH (NOLOCK) WHERE sid = @sid`);
 
         if (result.recordset.length) {
           return callback(null, JSON.parse(result.recordset[0].session));
